@@ -1,0 +1,425 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// Modèles extraits du backend principal nécessaires pour les notifications
+model Company {
+    company_id     String              @id @default(uuid())
+    name           String              @db.VarChar(100)
+    siret          String              @unique @db.VarChar(14)
+    tva_intra      String?             @db.VarChar(13)
+    tva_applicable Boolean
+    RCS_number     String              @db.VarChar(100)
+    RCS_city       String              @db.VarChar(100)
+    capital        Decimal?            @db.Decimal(10, 2)
+    siren          String              @unique @db.VarChar(9)
+    legal_form     LegalForm
+    address        String              @db.VarChar(255)
+    postal_code    String              @db.VarChar(10)
+    city           String              @db.VarChar(100)
+    country        String              @default("France") @db.VarChar(100)
+    email          String?             @db.VarChar(100)
+    phone          String?             @db.VarChar(20)
+    website        String?             @db.VarChar(255)
+    createdAt      DateTime            @default(now()) @map("createdAt")
+    updatedAt      DateTime            @updatedAt @map("updatedAt")
+    customers      Customer[]
+    invoices       Invoice[]
+    products       Product[]
+    quotes         Quote[]
+    users          User[]
+    notifications  EmailNotification[]
+}
+
+model User {
+    id                   String              @id
+    name                 String
+    email                String              @unique
+    emailVerified        Boolean
+    image                String?
+    createdAt            DateTime
+    updatedAt            DateTime
+    companyCompany_id    String?
+    first_name           String              @db.VarChar(50)
+    last_name            String              @db.VarChar(50)
+    company_id           String?
+    onboarding_completed Boolean             @default(false)
+    onboarding_step      OnboardingStep      @default(CHOOSING_COMPANY)
+    stripe_account_id    String?
+    stripe_onboarded     Boolean             @default(false)
+    Customer             Customer[]
+    Invoice              Invoice[]
+    Quote                Quote[]
+    Company              Company?            @relation(fields: [companyCompany_id], references: [company_id])
+    sentNotifications    EmailNotification[] @relation("UserSender")
+
+    @@map("user")
+}
+
+model Customer {
+    customer_id           String              @id @default(uuid())
+    user_id               String
+    company_id            String
+    type                  CustomerType        @default(individual)
+    email                 String?             @db.VarChar(100)
+    phone                 String?             @db.VarChar(20)
+    address               String?             @db.VarChar(100)
+    city                  String?             @db.VarChar(50)
+    postal_code           String?             @db.VarChar(20)
+    country               String              @default("France") @db.VarChar(50)
+    createdAt             DateTime            @default(now()) @map("createdAt")
+    updatedAt             DateTime            @updatedAt @map("updatedAt")
+    business              BusinessCustomer?
+    company               Company             @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+    user                  User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    individual            IndividualCustomer?
+    invoices              Invoice[]
+    quotes                Quote[]
+    receivedNotifications EmailNotification[] @relation("CustomerReceiver")
+}
+
+model BusinessCustomer {
+    customer_id    String   @id @unique
+    name           String   @db.VarChar(100)
+    siret          String   @db.VarChar(14)
+    siren          String   @db.VarChar(9)
+    tva_intra      String?  @db.VarChar(13)
+    tva_applicable Boolean
+    customer       Customer @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade)
+}
+
+model IndividualCustomer {
+    customer_id String   @id @unique
+    first_name  String   @db.VarChar(50)
+    last_name   String   @db.VarChar(50)
+    customer    Customer @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade)
+}
+
+model Product {
+    product_id          String        @id @default(uuid())
+    company_id          String
+    name                String        @db.VarChar(100)
+    description         String?
+    price_excluding_tax Decimal       @db.Decimal(10, 2)
+    vat_rate            VatRate       @default(ZERO)
+    unit                ProductUnit   @default(unite)
+    createdAt           DateTime      @default(now()) @map("createdAt")
+    updatedAt           DateTime      @updatedAt @map("updatedAt")
+    invoice_items       InvoiceItem[]
+    company             Company       @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+    quote_items         QuoteItem[]
+}
+
+model Invoice {
+    invoice_id           String              @id @default(uuid())
+    customer_id          String
+    user_id              String
+    company_id           String?
+    invoice_number       String              @unique @db.VarChar(50)
+    invoice_date         DateTime            @db.Date
+    due_date             DateTime            @db.Date
+    amount_excluding_tax Decimal             @db.Decimal(10, 2)
+    tax                  Decimal             @db.Decimal(10, 2)
+    amount_including_tax Decimal             @db.Decimal(10, 2)
+    status               InvoiceStatus
+    conditions           String?             @db.VarChar(1000)
+    late_payment_penalty String?
+    createdAt            DateTime            @default(now()) @map("createdAt")
+    updatedAt            DateTime            @updatedAt @map("updatedAt")
+    company              Company?            @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+    customer             Customer            @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade)
+    user                 User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    items                InvoiceItem[]
+    payments             Payment[]
+    notifications        EmailNotification[] @relation("InvoiceNotifications")
+}
+
+model InvoiceItem {
+    item_id                  String      @id @default(uuid())
+    invoice_id               String
+    product_id               String?
+    name                     String?     @db.VarChar(100)
+    description              String?
+    quantity                 Decimal     @db.Decimal(10, 2)
+    unit                     ProductUnit @default(unite)
+    unit_price_excluding_tax Decimal     @db.Decimal(10, 2)
+    vat_rate                 VatRate     @default(ZERO)
+    invoice                  Invoice     @relation(fields: [invoice_id], references: [invoice_id], onDelete: Cascade)
+    product                  Product?    @relation(fields: [product_id], references: [product_id])
+}
+
+model Payment {
+    payment_id     String        @id @default(uuid())
+    invoice_id     String
+    payment_date   DateTime
+    amount         Decimal       @db.Decimal(10, 2)
+    payment_method PaymentMethod
+    description    String?       @db.VarChar(500)
+    reference      String?       @db.VarChar(100)
+    createdAt      DateTime      @default(now()) @map("createdAt")
+    updatedAt      DateTime      @updatedAt @map("updatedAt")
+    invoice        Invoice       @relation(fields: [invoice_id], references: [invoice_id], onDelete: Cascade)
+}
+
+model Quote {
+    quote_id             String              @id @default(uuid())
+    customer_id          String
+    user_id              String
+    company_id           String?
+    quote_number         String              @unique @db.VarChar(50)
+    quote_date           DateTime            @db.Date
+    validity_date        DateTime            @db.Date
+    amount_excluding_tax Decimal             @db.Decimal(10, 2)
+    tax                  Decimal             @db.Decimal(10, 2)
+    amount_including_tax Decimal             @db.Decimal(10, 2)
+    status               QuoteStatus
+    conditions           String?             @db.VarChar(1000)
+    notes                String?
+    createdAt            DateTime            @default(now()) @map("createdAt")
+    updatedAt            DateTime            @updatedAt @map("updatedAt")
+    company              Company?            @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+    customer             Customer            @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade)
+    user                 User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    items                QuoteItem[]
+    notifications        EmailNotification[] @relation("QuoteNotifications")
+}
+
+model QuoteItem {
+    item_id                  String      @id @default(uuid())
+    quote_id                 String
+    product_id               String?
+    name                     String?     @db.VarChar(100)
+    description              String?
+    quantity                 Decimal     @db.Decimal(10, 2)
+    unit                     ProductUnit @default(unite)
+    unit_price_excluding_tax Decimal     @db.Decimal(10, 2)
+    vat_rate                 VatRate     @default(ZERO)
+    product                  Product?    @relation(fields: [product_id], references: [product_id])
+    quote                    Quote       @relation(fields: [quote_id], references: [quote_id], onDelete: Cascade)
+}
+
+// Nouveaux modèles spécifiques au microservice de notifications
+model EmailTemplate {
+    template_id   String              @id @default(uuid())
+    name          String              @unique @db.VarChar(100)
+    subject       String              @db.VarChar(200)
+    html_content  String              @db.Text
+    text_content  String?             @db.Text
+    variables     Json? // Variables Handlebars disponibles
+    type          EmailTemplateType
+    active        Boolean             @default(true)
+    createdAt     DateTime            @default(now())
+    updatedAt     DateTime            @updatedAt
+    notifications EmailNotification[]
+}
+
+model EmailNotification {
+    notification_id String             @id @default(uuid())
+    template_id     String?
+    user_id         String // Utilisateur qui envoie
+    customer_id     String? // Client qui reçoit (optionnel)
+    company_id      String
+    invoice_id      String?
+    quote_id        String?
+    recipient_email String             @db.VarChar(255)
+    recipient_name  String?            @db.VarChar(255)
+    sender_email    String             @db.VarChar(255)
+    sender_name     String             @db.VarChar(255)
+    subject         String             @db.VarChar(500)
+    html_content    String             @db.Text
+    text_content    String?            @db.Text
+    variables       Json? // Variables utilisées pour ce mail
+    type            NotificationType
+    status          NotificationStatus @default(pending)
+    scheduled_at    DateTime? // Pour les envois programmés
+    sent_at         DateTime?
+    delivered_at    DateTime?
+    opened_at       DateTime?
+    clicked_at      DateTime?
+    error_message   String?            @db.Text
+    retry_count     Int                @default(0)
+    max_retries     Int                @default(3)
+    priority        Int                @default(5) // 1 = haute, 5 = normale, 10 = basse
+    external_id     String? // ID Brevo/externe
+    metadata        Json? // Métadonnées additionnelles
+    createdAt       DateTime           @default(now())
+    updatedAt       DateTime           @updatedAt
+
+    // Relations
+    template    EmailTemplate?      @relation(fields: [template_id], references: [template_id])
+    user        User                @relation("UserSender", fields: [user_id], references: [id], onDelete: Cascade)
+    customer    Customer?           @relation("CustomerReceiver", fields: [customer_id], references: [customer_id])
+    company     Company             @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+    invoice     Invoice?            @relation("InvoiceNotifications", fields: [invoice_id], references: [invoice_id])
+    quote       Quote?              @relation("QuoteNotifications", fields: [quote_id], references: [quote_id])
+    attachments EmailAttachment[]
+    events      NotificationEvent[]
+}
+
+model EmailAttachment {
+    attachment_id   String   @id @default(uuid())
+    notification_id String
+    filename        String   @db.VarChar(255)
+    original_name   String   @db.VarChar(255)
+    file_path       String?  @db.VarChar(500) // Chemin local ou URL
+    file_size       Int? // Taille en bytes
+    mime_type       String   @db.VarChar(100)
+    content_base64  String?  @db.Text // Contenu encodé en base64
+    createdAt       DateTime @default(now())
+
+    notification EmailNotification @relation(fields: [notification_id], references: [notification_id], onDelete: Cascade)
+}
+
+model NotificationEvent {
+    event_id        String    @id @default(uuid())
+    notification_id String
+    event_type      EventType
+    timestamp       DateTime  @default(now())
+    data            Json? // Données associées à l'événement
+    external_id     String? // ID externe (Brevo webhook)
+
+    notification EmailNotification @relation(fields: [notification_id], references: [notification_id], onDelete: Cascade)
+}
+
+model NotificationQueue {
+    queue_id        String      @id @default(uuid())
+    notification_id String      @unique
+    status          QueueStatus @default(pending)
+    scheduled_at    DateTime    @default(now())
+    attempts        Int         @default(0)
+    max_attempts    Int         @default(3)
+    last_attempt_at DateTime?
+    completed_at    DateTime?
+    error_message   String?     @db.Text
+    createdAt       DateTime    @default(now())
+    updatedAt       DateTime    @updatedAt
+}
+
+// Enums
+enum OnboardingStep {
+    CHOOSING_COMPANY
+    STRIPE_SETUP
+    FINISH
+}
+
+enum LegalForm {
+    SAS
+    SARL
+    SA
+    SASU
+    EURL
+    SNC
+    SOCIETE_CIVILE
+    ENTREPRISE_INDIVIDUELLE
+}
+
+enum CustomerType {
+    individual
+    company
+}
+
+enum InvoiceStatus {
+    pending
+    sent
+    paid
+    cancelled
+    late
+}
+
+enum QuoteStatus {
+    draft
+    sent
+    accepted
+    rejected
+    expired
+}
+
+enum PaymentMethod {
+    cash
+    credit_card
+    bank_transfer
+    stripe
+}
+
+enum ProductUnit {
+    unite @map("unité")
+    kg
+    g
+    l
+    ml
+    m
+    cm
+    m2    @map("m²")
+    cm2   @map("cm²")
+    m3    @map("m³")
+    h
+    jour
+    mois
+    annee @map("année")
+}
+
+enum VatRate {
+    ZERO      @map("0.00")
+    REDUCED_1 @map("2.10")
+    REDUCED_2 @map("5.50")
+    REDUCED_3 @map("10.00")
+    STANDARD  @map("20.00")
+}
+
+enum EmailTemplateType {
+    INVOICE // Envoi de facture
+    QUOTE // Envoi de devis
+    PAYMENT_CONFIRMATION // Confirmation de paiement
+    PAYMENT_FAILURE // Échec de paiement
+    REMINDER // Relance
+    WELCOME // Email de bienvenue
+    CUSTOM // Template personnalisé
+}
+
+enum NotificationType {
+    INVOICE_SENT // Facture envoyée
+    QUOTE_SENT // Devis envoyé
+    PAYMENT_CONFIRMATION // Confirmation de paiement
+    PAYMENT_FAILURE // Échec de paiement
+    REMINDER // Relance
+    MARKETING // Email marketing
+    SYSTEM // Notification système
+    CUSTOM // Notification personnalisée
+}
+
+enum NotificationStatus {
+    pending // En attente d'envoi
+    sent // Envoyé
+    delivered // Délivré
+    opened // Ouvert par le destinataire
+    clicked // Cliqué par le destinataire
+    bounced // Rejeté
+    spam // Marqué comme spam
+    failed // Échec d'envoi
+    cancelled // Annulé
+}
+
+enum EventType {
+    sent
+    delivered
+    opened
+    clicked
+    bounced
+    spam
+    blocked
+    unsubscribed
+    error
+}
+
+enum QueueStatus {
+    pending
+    processing
+    completed
+    failed
+    cancelled
+}
